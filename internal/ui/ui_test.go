@@ -20,9 +20,9 @@ func get(t *testing.T, h http.Handler, method, path string) (*http.Response, str
 
 func TestServesTheBuiltUI(t *testing.T) {
 	h := New(fstest.MapFS{
-		"index.html":       {Data: []byte("<html>moipctl</html>")},
-		"_nuxt/app.abc.js": {Data: []byte("console.log(1)")},
-		"favicon.svg":      {Data: []byte("<svg/>")},
+		"index.html":        {Data: []byte("<html>moipctl</html>")},
+		"assets/app.abc.js": {Data: []byte("console.log(1)")},
+		"favicon.svg":       {Data: []byte("<svg/>")},
 	})
 
 	res, body := get(t, h, "GET", "/")
@@ -37,11 +37,14 @@ func TestServesTheBuiltUI(t *testing.T) {
 			t.Errorf("CSP lacks %q: %q", want, res.Header.Get("Content-Security-Policy"))
 		}
 	}
+	if strings.Contains(res.Header.Get("Content-Security-Policy"), "unsafe-inline") || strings.Contains(res.Header.Get("Content-Security-Policy"), "unsafe-eval") {
+		t.Errorf("the policy must not allow inline or eval: %q", res.Header.Get("Content-Security-Policy"))
+	}
 	if res.Header.Get("X-Content-Type-Options") != "nosniff" || res.Header.Get("X-Frame-Options") != "DENY" {
 		t.Errorf("security headers missing: %v", res.Header)
 	}
 
-	res, _ = get(t, h, "GET", "/_nuxt/app.abc.js")
+	res, _ = get(t, h, "GET", "/assets/app.abc.js")
 	if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
 		t.Errorf("hashed asset: %d %q", res.StatusCode, res.Header.Get("Cache-Control"))
 	}

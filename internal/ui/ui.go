@@ -1,4 +1,4 @@
-// Package ui serves the web UI built from frontend/ (Nuxt, static output), which is embedded in the binary.
+// Package ui serves the web UI built from frontend/ (Vue and Vite, static output), which is embedded in the binary.
 //
 // `make frontend` builds the UI and copies it to internal/ui/dist. Until that has been done the binary has no UI:
 // the API works and "/" says how to build it, so `go build` and `go test` need no Node.js.
@@ -14,10 +14,11 @@ import (
 //go:embed all:dist
 var embedded embed.FS
 
-// Content-Security-Policy of the UI. Nuxt's static output has inline scripts and styles (the colour-mode switch
-// runs before the first paint), so those are allowed; everything else is limited to this origin. The UI never
-// writes network-supplied text as HTML, which is what keeps injected markup out.
-const csp = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+// Content-Security-Policy of the UI. The built page has no inline script or style (the theme is applied by an
+// external script), so nothing but this origin may run or style anything: markup injected through a name that
+// came from the network could not execute even if the UI ever let it through. The UI does not do that either: it
+// never writes network-supplied text as HTML.
+const csp = "default-src 'self'; script-src 'self'; style-src 'self'; " +
 	"img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 // Handler serves the UI embedded in the binary.
@@ -62,7 +63,7 @@ func New(fsys fs.FS) http.Handler {
 			// the page itself must never be cached: it names the hashed assets of this build
 			h.Set("Cache-Control", "no-cache")
 			files.ServeHTTP(w, r)
-		case strings.HasPrefix(r.URL.Path, "/_nuxt/"):
+		case strings.HasPrefix(r.URL.Path, "/assets/"):
 			// file names carry a content hash
 			h.Set("Cache-Control", "public, max-age=31536000, immutable")
 			files.ServeHTTP(w, r)
