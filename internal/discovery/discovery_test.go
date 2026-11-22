@@ -134,3 +134,65 @@ func TestPicksTheAddressOnADirectlyAttachedSubnet(t *testing.T) {
 		t.Fatalf("got %+v", e)
 	}
 }
+
+func TestBrowseMergesPassesAndKeepsTheLatestAnswer(t *testing.T) {
+	moved := Entry{ID: "a", Hostname: "utone-a", Addr: "10.10.20.9:8000"}
+	other := Entry{ID: "b", Hostname: "utone-b", Addr: "10.10.20.4:8000"}
+	var calls []time.Duration
+	answers := [][]Entry{{nodeAForTest}, {}, {moved, other}} // a pass may come back empty
+	b := ZeroconfBrowser{pass: func(_ context.Context, d time.Duration) ([]Entry, error) {
+		calls = append(calls, d)
+		r := answers[len(calls)-1]
+		return r, nil
+	}}
+	got, err := b.Browse(context.Background(), 6*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 3 || calls[0] != 2*time.Second {
+		t.Fatalf("want 3 passes of 2s, got %v", calls)
+	}
+	if len(got) != 2 || got[0] != moved || got[1] != other {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestBrowseFindsANodeThatOnlyOnePassSees(t *testing.T) {
+	n := 0
+	b := ZeroconfBrowser{pass: func(context.Context, time.Duration) ([]Entry, error) {
+		n++
+		if n == 3 { // the first two queries went unanswered
+			return []Entry{nodeAForTest}, nil
+		}
+		return nil, nil
+	}}
+	got, _ := b.Browse(context.Background(), 6*time.Second)
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestBrowseReturnsAPassError(t *testing.T) {
+	b := ZeroconfBrowser{pass: func(context.Context, time.Duration) ([]Entry, error) {
+		return nil, errors.New("no multicast interface")
+	}}
+	if _, err := b.Browse(context.Background(), time.Second); err == nil {
+		t.Fatal("want the error")
+	}
+}
+
+func TestBrowseStopsWhenTheContextIsDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	n := 0
+	b := ZeroconfBrowser{pass: func(context.Context, time.Duration) ([]Entry, error) {
+		n++
+		cancel()
+		return nil, nil
+	}}
+	b.Browse(ctx, 6*time.Second)
+	if n != 1 {
+		t.Fatalf("want to stop after the cancelled pass, ran %d", n)
+	}
+}
+
+var nodeAForTest = Entry{ID: "a", Hostname: "utone-a", Addr: "10.10.20.3:8000"}

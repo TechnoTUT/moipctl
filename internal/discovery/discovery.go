@@ -52,7 +52,7 @@ func (o Options) withDefaults() Options {
 		o.Interval = 15 * time.Second
 	}
 	if o.Window <= 0 {
-		o.Window = 4 * time.Second
+		o.Window = 6 * time.Second
 	}
 	if o.MissRounds <= 0 {
 		o.MissRounds = 3
@@ -120,11 +120,64 @@ func (d *Discoverer) Round(ctx context.Context) {
 	}
 }
 
-// ZeroconfBrowser browses _moip._tcp on all multicast interfaces.
-type ZeroconfBrowser struct{}
+// defaultPasses is how many separate queries one browse round sends.
+const defaultPasses = 3
 
-func (ZeroconfBrowser) Browse(ctx context.Context, window time.Duration) ([]Entry, error) {
-	ctx, cancel := context.WithTimeout(ctx, window)
+// ZeroconfBrowser browses _moip._tcp on all multicast interfaces.
+//
+// The zeroconf library sends one query when a browse starts and the next one
+// only after four seconds, so a long window does not help: against a real
+// avahi-daemon, about a quarter of single queries went unanswered (the
+// responder limits how often it repeats a record). A round is therefore split
+// into several short browses, each sending a fresh query, and the answers are
+// merged; with three queries a round misses a node only a few percent of the
+// time instead of a quarter.
+type ZeroconfBrowser struct {
+	// Passes is the number of queries per round (default 3).
+	Passes int
+
+	// pass runs one short browse; tests replace it.
+	pass func(ctx context.Context, d time.Duration) ([]Entry, error)
+}
+
+func (b ZeroconfBrowser) Browse(ctx context.Context, window time.Duration) ([]Entry, error) {
+	passes := b.Passes
+	if passes <= 0 {
+		passes = defaultPasses
+	}
+	pass := b.pass
+	if pass == nil {
+		pass = browseOnce
+	}
+	slice := window / time.Duration(passes)
+
+	merged := map[string]Entry{}
+	var order []string
+	for i := 0; i < passes; i++ {
+		entries, err := pass(ctx, slice)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if _, seen := merged[e.ID]; !seen {
+				order = append(order, e.ID)
+			}
+			merged[e.ID] = e // the latest answer wins
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	out := make([]Entry, 0, len(order))
+	for _, id := range order {
+		out = append(out, merged[id])
+	}
+	return out, nil
+}
+
+// browseOnce runs one zeroconf browse for d and returns what answered.
+func browseOnce(ctx context.Context, d time.Duration) ([]Entry, error) {
+	ctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 
 	ch := make(chan *zeroconf.ServiceEntry, 32)
