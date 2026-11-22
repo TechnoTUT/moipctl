@@ -132,3 +132,24 @@ func TestAliasesSurviveBeforeAndAfterTheNodeIsSeen(t *testing.T) {
 		t.Fatalf("got %+v", n)
 	}
 }
+
+func TestSeenFromRecordsTheSource(t *testing.T) {
+	r := New()
+	r.SeenFrom("av", "a", "utone-a", "10.10.20.3:8000")
+	if n, _ := r.Get("a"); n.Source != "av" {
+		t.Fatalf("got %+v", n)
+	}
+	ch, cancel := r.Subscribe()
+	defer cancel()
+	if r.SeenFrom("ent", "a", "utone-a", "10.10.20.3:8000") {
+		t.Fatal("a new source alone must not reopen the state stream")
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("subscribers should still hear that the source changed")
+	}
+	if n, _ := r.Get("a"); n.Source != "ent" {
+		t.Fatalf("got %+v", n)
+	}
+}

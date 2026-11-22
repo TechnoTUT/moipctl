@@ -30,9 +30,9 @@ const Service = "_moip._tcp"
 
 // Entry is a node found by one browse round.
 type Entry struct {
-	ID       string
-	Hostname string
-	Addr     string // host:port
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+	Addr     string `json:"addr"` // host:port
 }
 
 // Browser runs one browse round and returns what answered within window.

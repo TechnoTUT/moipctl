@@ -21,6 +21,9 @@ type Node struct {
 	Alias    string `json:"alias,omitempty"`
 	Addr     string `json:"addr"`   // host:port of the node's HTTP API
 	Online   bool   `json:"online"` // advertised on the network
+	// Source names what found the node: the scout (one per VLAN) that reported
+	// it. Empty for a node found by this process itself or added by hand.
+	Source string `json:"source,omitempty"`
 	// Connected is true while the node's state stream is alive. An online node
 	// that is not connected shows a State that may be stale.
 	Connected bool        `json:"connected"`
@@ -58,6 +61,11 @@ func New() *Registry {
 // It returns true if the node was new or its address changed, which is when a
 // state stream has to be (re)opened.
 func (r *Registry) Seen(id, hostname, addr string) (changed bool) {
+	return r.SeenFrom("", id, hostname, addr)
+}
+
+// SeenFrom is Seen for a node reported by the named source.
+func (r *Registry) SeenFrom(source, id, hostname, addr string) (changed bool) {
 	r.mu.Lock()
 	n, ok := r.nodes[id]
 	if !ok {
@@ -68,9 +76,10 @@ func (r *Registry) Seen(id, hostname, addr string) (changed bool) {
 	if n.Addr != addr {
 		n.Connected = false // the old stream, if any, was to another address
 	}
-	n.Hostname, n.Addr, n.Online, n.LastSeen = hostname, addr, true, r.now()
+	moved := n.Source != source
+	n.Hostname, n.Addr, n.Source, n.Online, n.LastSeen = hostname, addr, source, true, r.now()
 	r.mu.Unlock()
-	if changed {
+	if changed || moved {
 		r.notify()
 	}
 	return changed
