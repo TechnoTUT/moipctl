@@ -182,6 +182,7 @@ func TestBulkReportsEachNode(t *testing.T) {
 func put(t *testing.T, url, body string) (*http.Response, []byte) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -215,5 +216,97 @@ func TestSetAliasPersistsAndValidates(t *testing.T) {
 	}
 	if resp, _ := put(t, srv.URL+"/api/nodes/a/alias", `nope`); resp.StatusCode != 400 {
 		t.Fatalf("bad JSON: status=%d", resp.StatusCode)
+	}
+}
+
+func TestWritesMustBeJSONAndSameOrigin(t *testing.T) {
+	var got calls
+	reg, srv := newTestServer(t)
+	reg.Seen("a", "utone-a", fakeNode(t, &got))
+
+	do := func(method, path, ctype, origin, body string) int {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		if ctype != "" {
+			req.Header.Set("Content-Type", ctype)
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	host := strings.TrimPrefix(srv.URL, "http://")
+
+	// What a page on another site can send without a preflight: a form or text/plain.
+	for _, ct := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data"} {
+		if code := do("POST", "/api/nodes/a/rx/stop", ct, "", "{}"); code != http.StatusUnsupportedMediaType {
+			t.Errorf("POST with Content-Type %q: status=%d, want 415", ct, code)
+		}
+		if code := do("PUT", "/api/nodes/a/alias", ct, "", `{"alias":"x"}`); code != http.StatusUnsupportedMediaType {
+			t.Errorf("PUT with Content-Type %q: status=%d, want 415", ct, code)
+		}
+	}
+	if n := len(got.all()); n != 0 {
+		t.Fatalf("a refused request must not reach the node, it saw %d", n)
+	}
+
+	if code := do("POST", "/api/nodes/a/rx/stop", "application/json; charset=utf-8", "", "{}"); code != 200 {
+		t.Errorf("JSON with a charset: status=%d", code)
+	}
+	if code := do("POST", "/api/nodes/a/rx/stop", "application/json", "http://"+host, "{}"); code != 200 {
+		t.Errorf("same origin: status=%d", code)
+	}
+	if code := do("POST", "/api/nodes/a/rx/stop", "application/json", "http://evil.example", "{}"); code != http.StatusForbidden {
+		t.Errorf("other origin: status=%d, want 403", code)
+	}
+	// reads are not affected, and carry nosniff
+	resp, err := http.Get(srv.URL + "/api/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("GET: status=%d nosniff=%q", resp.StatusCode, resp.Header.Get("X-Content-Type-Options"))
+	}
+}
+
+func TestUIIsServedAndTheAPIStillWins(t *testing.T) {
+	reg, srv := newTestServer(t)
+	reg.Seen("a", "utone-a", "x:1")
+
+	// "/" is the web UI (or the note that this build has none); it is not JSON and it has the UI's headers
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Fatalf("/: status=%d type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if resp.Header.Get("Content-Security-Policy") == "" {
+		t.Error("the UI must carry its Content-Security-Policy")
+	}
+
+	// everything under /api/ is still the API, and an unknown /api/ path is a JSON 404, not the UI
+	resp, err = http.Get(srv.URL + "/api/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Errorf("/api/nodes: %q", resp.Header.Get("Content-Type"))
+	}
+	resp, err = http.Get(srv.URL + "/api/does-not-exist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 404 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Errorf("/api/does-not-exist: status=%d type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 }

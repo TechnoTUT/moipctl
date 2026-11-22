@@ -17,7 +17,9 @@ DJ and AV networks can reach, is not attached to any node VLAN.
 | Path | Content |
 |---|---|
 | `cmd/moipctl/` | entry point |
-| `internal/` | controller packages |
+| `internal/` | controller packages (`internal/ui` embeds the built web UI) |
+| `frontend/` | the web UI: Vue 3, Vite and Tailwind |
+| `test/ui/` | fake nodes and a headless-Chrome check of the web UI |
 | `external/moip-toolkit/` | submodule, pinned to the commit utone-linux bundles |
 | `external/utone-linux/` | submodule |
 
@@ -41,7 +43,8 @@ Keep `external/moip-toolkit` and utone-linux's `opt/moip-toolkit` on the same co
 
 ## API
 
-Errors are `{"detail": "..."}`.
+Errors are `{"detail": "..."}`. Writes (POST, PUT) must send `Content-Type: application/json`, and a write that names another
+origin is refused: the API has no authentication, so this keeps a web page that an operator happens to have open from driving it.
 
 | Method | Path | Description |
 |---|---|---|
@@ -54,9 +57,33 @@ Errors are `{"detail": "..."}`.
 `role/action` is one of `rx/{start,switch,stop}`, `tx/{start,stop}`, `multiview/{start,stop}`, `signage/{start,stop}`.
 
 ```bash
-curl -X POST localhost:8080/api/bulk/rx/switch \
+curl -X POST localhost:8080/api/bulk/rx/switch -H 'Content-Type: application/json' \
   -d '{"nodes": ["utone-a1b2c3", "utone-d4e5f6"], "body": {"sender_name": "CAM1 (OBS)"}}'
 ```
+
+## Web UI
+
+`/` is a web UI in the look of moip-toolkit's: one compact card per node (receiver, sender, multi-view, signage, CPU and RAM) and
+the NDI sources the nodes see. Tick nodes, then **Show on N selected nodes**: a running receiver is switched, a stopped one is
+started, and a toast gives the result per node, failures with their reason. A card can also stop its receiver, sender or
+multi-view, start or stop signage, and rename the node. It follows `/api/events`, so it updates by itself; a node that moipctl
+cannot reach is shown as such and cannot be operated.
+
+The UI is built from `frontend/` (Vue 3, Vite, Tailwind with the same theme as moip-toolkit) and embedded in the binary:
+
+```bash
+make all           # make frontend (npm ci, build, copy to internal/ui/dist) + make build
+make test          # Go tests, the frontend's logic tests and its type check
+make ui-check      # drive the UI in headless Chrome against fake nodes (needs python3, node and google-chrome)
+cd frontend && npm run dev   # development server; proxies /api to a moipctl on :8080
+```
+
+Without `make frontend` the binary still builds and `/` says so; the Docker image always has the UI.
+
+There is no authentication, so the UI is protected the way the API is: by the network (see Discovery), and against the
+browser itself. Every write must be JSON and may not come from another origin, so another web page cannot drive moipctl from an
+operator's browser. The page loads no inline script or style (the Content-Security-Policy allows only this origin), and text
+from the network (aliases, hostnames, NDI source names) is only ever shown as text, never as HTML.
 
 ## Discovery
 

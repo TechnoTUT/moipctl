@@ -8,9 +8,12 @@
 //	POST /api/nodes/{id}/{role}/{action}
 //	                        forward an operation to one node; the body goes to
 //	                        the node as is and the node's reply comes back
+//	GET /                   the web UI (frontend/, embedded; see package ui)
 //	POST /api/bulk/{role}/{action}
 //	                        {"nodes": [ids], "body": {...}}: run it on several
 //	                        nodes; {"results": [...]} has one entry per node
+//
+// Writes (POST, PUT) must have Content-Type: application/json, see guard.
 //
 // Errors are returned as {"detail": "..."} like moip-toolkit's API.
 package api
@@ -19,13 +22,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/TechnoTUT/moipctl/internal/control"
 	"github.com/TechnoTUT/moipctl/internal/registry"
+	"github.com/TechnoTUT/moipctl/internal/ui"
 )
 
 const (
@@ -63,7 +69,34 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusNotFound, "not found")
 	})
-	return mux
+	mux.Handle("/", ui.Handler()) // the web UI; everything under /api/ is matched above
+	return guard(mux)
+}
+
+// guard protects the API, which has no authentication, from being driven by a
+// web page the operator happens to have open. A browser sends a cross-site
+// form or text/plain POST without asking first, so every write has to be
+// JSON: that makes a cross-site request "non-simple", the browser sends a
+// preflight, and there is no CORS answer to it. A write that names another
+// origin is refused as well.
+func guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+				httpError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+				return
+			}
+			if o := r.Header.Get("Origin"); o != "" {
+				if u, err := url.Parse(o); err != nil || u.Host != r.Host {
+					httpError(w, http.StatusForbidden, "cross-origin request")
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 const maxAliasLen = 64
