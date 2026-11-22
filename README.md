@@ -58,6 +58,17 @@ curl -X POST localhost:8080/api/bulk/rx/switch \
 (TechnoTUT/utone-linux#4). mDNS does not cross routers, so on Kubernetes attach the pod to the nodes' VLANs
 with vxlan-cni (one `net` per VLAN, e.g. 20 and 42). A node is marked offline after three silent 15-second rounds.
 
+## Container
+
+```bash
+podman build -t moipctl --build-arg VERSION=dev .
+podman run --rm -p 8080:8080 -v moipctl-data:/data moipctl --mdns=false --node 10.10.16.20:8000
+```
+
+The image runs as uid 10001 and keeps the aliases in `/data/state.json`. Pushes to `main` and `v*` tags publish
+`ghcr.io/technotut/moipctl` (tag `v0.1.0` becomes image tag `0.1.0`). The Kubernetes manifests live in
+[TechnoTUT/Infra](https://github.com/TechnoTUT/Infra) (`k8s/manifest/moipctl`).
+
 ## Build
 
 ```bash
