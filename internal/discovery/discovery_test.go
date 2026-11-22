@@ -103,3 +103,15 @@ func TestEntryFromService(t *testing.T) {
 		t.Fatal("missing port must be rejected")
 	}
 }
+
+func TestNodesNotFoundByDiscoveryNeverExpire(t *testing.T) {
+	reg := registry.New()
+	reg.Seen("static", "static", "10.0.0.7:8000")
+	d := New(reg, &fakeBrowser{rounds: [][]Entry{{}}}, Options{MissRounds: 1})
+	for range 3 {
+		d.Round(context.Background())
+	}
+	if n, _ := reg.Get("static"); !n.Online {
+		t.Fatal("discovery must not expire a node it did not find")
+	}
+}

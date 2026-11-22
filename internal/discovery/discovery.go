@@ -105,14 +105,17 @@ func (d *Discoverer) Round(ctx context.Context) {
 			log.Printf("discovery: node %s (%s) at %s", e.ID, e.Hostname, e.Addr)
 		}
 	}
-	for _, n := range d.reg.List() {
-		if !n.Online || seen[n.ID] {
+	// Only nodes found here can expire here; nodes added by other means
+	// (static addresses) are never marked offline by discovery.
+	for id := range d.missed {
+		if seen[id] {
 			continue
 		}
-		d.missed[n.ID]++
-		if d.missed[n.ID] >= d.opts.MissRounds {
-			log.Printf("discovery: node %s (%s) is gone", n.ID, n.Hostname)
-			d.reg.Gone(n.ID)
+		d.missed[id]++
+		if d.missed[id] >= d.opts.MissRounds {
+			log.Printf("discovery: node %s is gone", id)
+			d.reg.Gone(id)
+			delete(d.missed, id)
 		}
 	}
 }
