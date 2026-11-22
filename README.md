@@ -7,6 +7,11 @@ Nodes advertise themselves over mDNS (`_moip._tcp`); moipctl discovers them, fol
 state through `/api/events` (SSE) and fans operations out to them, so nobody has to look up
 DHCP addresses by hand.
 
+mDNS does not cross routers, so on Kubernetes the controller does not search itself. One small
+**scout** (`moipctl scout`) per VLAN that has nodes searches there and reports the addresses it
+finds to the controller, which then talks to the nodes through the router. The controller, which the
+DJ and AV networks can reach, is not attached to any node VLAN.
+
 ## Layout
 
 | Path | Content |
@@ -28,7 +33,9 @@ Keep `external/moip-toolkit` and utone-linux's `opt/moip-toolkit` on the same co
 | Flag | Description |
 |---|---|
 | `--host`, `--port` | listen address (default `0.0.0.0:8080`) |
-| `--mdns` | discover nodes over mDNS (default on). Needs to be attached to the nodes' VLANs, see below |
+| `--mdns` | discover nodes over mDNS from this process (default on). Needs to be attached to the nodes' VLANs; use scouts instead where it is not |
+| `--scout-listen addr` | accept scout reports on this address, e.g. `:8081` (default: off). Keep it apart from the API's network |
+| `--scout-ttl` | a node that no scout has reported for this long is marked offline (default 45s, three scout rounds) |
 | `--node host:port` | add a node by address (repeatable). It is never marked offline by discovery |
 | `--state file` | keeps node aliases across restarts (empty: memory only) |
 
@@ -55,8 +62,23 @@ curl -X POST localhost:8080/api/bulk/rx/switch \
 
 `moip web` advertises `_moip._tcp` through avahi-daemon with the TXT records `id`, `hostname` and `version`
 (TechnoTUT/moip-toolkit#14). The node ID is its hostname, which utone-linux derives from the MAC address
-(TechnoTUT/utone-linux#4). mDNS does not cross routers, so on Kubernetes attach the pod to the nodes' VLANs
-with vxlan-cni (one `net` per VLAN, e.g. 20 and 42). A node is marked offline after three silent 15-second rounds.
+(TechnoTUT/utone-linux#4).
+
+mDNS stays inside a VLAN, so a scout has to be attached to every VLAN that has nodes:
+
+```bash
+moipctl serve --mdns=false --scout-listen :8081          # the controller
+moipctl scout --controller http://moipctl:8081 --source av   # one per VLAN, attached to that VLAN
+```
+
+A scout searches every 15 seconds and reports after each search, also when it found nothing. The controller
+marks a node offline when no report lists it within `--scout-ttl`, and a search that failed sends nothing, so a
+broken scout does not take nodes offline by itself. Reports are validated (unicast IPv4 `host:port` only)
+because the controller connects to the addresses in them; there is no authentication, so the scout listener
+must only be reachable from the scouts (a separate port and a network policy). The controller reaches the nodes
+(TCP 8000) through the router, which needs a firewall policy per node VLAN.
+
+Each node shows the scout that found it as `source`.
 
 ## Container
 
