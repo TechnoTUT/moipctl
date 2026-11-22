@@ -274,3 +274,39 @@ func TestWritesMustBeJSONAndSameOrigin(t *testing.T) {
 		t.Errorf("GET: status=%d nosniff=%q", resp.StatusCode, resp.Header.Get("X-Content-Type-Options"))
 	}
 }
+
+func TestUIIsServedAndTheAPIStillWins(t *testing.T) {
+	reg, srv := newTestServer(t)
+	reg.Seen("a", "utone-a", "x:1")
+
+	// "/" is the web UI (or the note that this build has none); it is not JSON and it has the UI's headers
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Fatalf("/: status=%d type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if resp.Header.Get("Content-Security-Policy") == "" {
+		t.Error("the UI must carry its Content-Security-Policy")
+	}
+
+	// everything under /api/ is still the API, and an unknown /api/ path is a JSON 404, not the UI
+	resp, err = http.Get(srv.URL + "/api/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Errorf("/api/nodes: %q", resp.Header.Get("Content-Type"))
+	}
+	resp, err = http.Get(srv.URL + "/api/does-not-exist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 404 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Errorf("/api/does-not-exist: status=%d type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}

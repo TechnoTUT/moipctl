@@ -8,6 +8,7 @@
 //	POST /api/nodes/{id}/{role}/{action}
 //	                        forward an operation to one node; the body goes to
 //	                        the node as is and the node's reply comes back
+//	GET /                   the web UI (frontend/, embedded; see package ui)
 //	POST /api/bulk/{role}/{action}
 //	                        {"nodes": [ids], "body": {...}}: run it on several
 //	                        nodes; {"results": [...]} has one entry per node
@@ -30,6 +31,7 @@ import (
 
 	"github.com/TechnoTUT/moipctl/internal/control"
 	"github.com/TechnoTUT/moipctl/internal/registry"
+	"github.com/TechnoTUT/moipctl/internal/ui"
 )
 
 const (
@@ -67,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusNotFound, "not found")
 	})
+	mux.Handle("/", ui.Handler()) // the web UI; everything under /api/ is matched above
 	return guard(mux)
 }
 
