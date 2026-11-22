@@ -80,6 +80,20 @@ must only be reachable from the scouts (a separate port and a network policy). T
 
 Each node shows the scout that found it as `source`.
 
+## Testing against a real node
+
+`test/node` builds a real moip-toolkit node into a container (the Go server and the Rust engine from the
+`external/moip-toolkit` submodule, plus avahi-daemon so that it advertises `_moip._tcp` the way utone-linux does).
+It has no NDI runtime (its licence does not allow redistributing it), so rx/tx/multiview fail in the engine, while
+the API, the state stream, node info and the mDNS advertisement are real. CI publishes it as
+`ghcr.io/technotut/moipctl-node-test`; `test/node/pod.yaml` runs one on VLAN 20 and one on VLAN 42.
+
+```bash
+git submodule update --init --recursive external/moip-toolkit
+podman build -f test/node/Dockerfile -t moipctl-node-test .
+podman run -d --name node --hostname utone-test moipctl-node-test
+```
+
 ## Container
 
 ```bash
