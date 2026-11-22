@@ -3,6 +3,8 @@
 //	GET /api/nodes          all known nodes
 //	GET /api/nodes/{id}     one node
 //	GET /api/events         Server-Sent Events: the node list, sent when it changes
+//	PUT /api/nodes/{id}/alias
+//	                        {"alias": "..."}: set the display name ("" clears it)
 //	POST /api/nodes/{id}/{role}/{action}
 //	                        forward an operation to one node; the body goes to
 //	                        the node as is and the node's reply comes back
@@ -18,7 +20,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/TechnoTUT/moipctl/internal/control"
 	"github.com/TechnoTUT/moipctl/internal/registry"
@@ -32,6 +36,8 @@ const (
 type Server struct {
 	Reg *registry.Registry
 	Ctl *control.Controller
+	// Persist, if set, is called with all aliases after each change.
+	Persist func(aliases map[string]string) error
 }
 
 func (s *Server) Handler() http.Handler {
@@ -50,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, n)
 	})
+	mux.HandleFunc("PUT /api/nodes/{id}/alias", s.setAlias)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("POST /api/nodes/{id}/{role}/{action}", s.call)
 	mux.HandleFunc("POST /api/bulk/{role}/{action}", s.bulk)
@@ -57,6 +64,36 @@ func (s *Server) Handler() http.Handler {
 		httpError(w, http.StatusNotFound, "not found")
 	})
 	return mux
+}
+
+const maxAliasLen = 64
+
+func (s *Server) setAlias(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Alias string `json:"alias"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	alias := strings.TrimSpace(req.Alias)
+	if utf8.RuneCountInString(alias) > maxAliasLen {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("alias is longer than %d characters", maxAliasLen))
+		return
+	}
+	id := r.PathValue("id")
+	if !s.Reg.SetAlias(id, alias) {
+		httpError(w, http.StatusNotFound, "unknown node")
+		return
+	}
+	if s.Persist != nil {
+		if err := s.Persist(s.Reg.Aliases()); err != nil {
+			httpError(w, http.StatusInternalServerError, "alias is set but could not be saved: "+err.Error())
+			return
+		}
+	}
+	n, _ := s.Reg.Get(id)
+	writeJSON(w, http.StatusOK, n)
 }
 
 func (s *Server) call(w http.ResponseWriter, r *http.Request) {

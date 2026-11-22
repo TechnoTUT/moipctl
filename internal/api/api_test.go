@@ -178,3 +178,42 @@ func TestBulkReportsEachNode(t *testing.T) {
 		t.Fatalf("unsupported op: status=%d", resp.StatusCode)
 	}
 }
+
+func put(t *testing.T, url, body string) (*http.Response, []byte) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader([]byte(body)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, b
+}
+
+func TestSetAliasPersistsAndValidates(t *testing.T) {
+	reg := registry.New()
+	var saved map[string]string
+	srv := httptest.NewServer((&Server{Reg: reg, Ctl: control.New(reg), Persist: func(a map[string]string) error {
+		saved = a
+		return nil
+	}}).Handler())
+	defer srv.Close()
+	reg.Seen("a", "utone-a", "x:1")
+
+	resp, body := put(t, srv.URL+"/api/nodes/a/alias", `{"alias":"  entrance  "}`)
+	var n registry.Node
+	json.Unmarshal(body, &n)
+	if resp.StatusCode != 200 || n.Alias != "entrance" || saved["a"] != "entrance" {
+		t.Fatalf("status=%d node=%+v saved=%v", resp.StatusCode, n, saved)
+	}
+	if resp, _ := put(t, srv.URL+"/api/nodes/nope/alias", `{"alias":"x"}`); resp.StatusCode != 404 {
+		t.Fatalf("unknown node: status=%d", resp.StatusCode)
+	}
+	if resp, _ := put(t, srv.URL+"/api/nodes/a/alias", `{"alias":"`+strings.Repeat("あ", 65)+`"}`); resp.StatusCode != 400 {
+		t.Fatalf("too long: status=%d", resp.StatusCode)
+	}
+	if resp, _ := put(t, srv.URL+"/api/nodes/a/alias", `nope`); resp.StatusCode != 400 {
+		t.Fatalf("bad JSON: status=%d", resp.StatusCode)
+	}
+}

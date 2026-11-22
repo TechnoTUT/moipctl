@@ -20,6 +20,7 @@ import (
 	"github.com/TechnoTUT/moipctl/internal/control"
 	"github.com/TechnoTUT/moipctl/internal/discovery"
 	"github.com/TechnoTUT/moipctl/internal/registry"
+	"github.com/TechnoTUT/moipctl/internal/store"
 	"github.com/TechnoTUT/moipctl/internal/stream"
 )
 
@@ -27,6 +28,7 @@ func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	host := fs.String("host", "0.0.0.0", "listen address")
 	port := fs.Int("port", 8080, "listen port")
+	statePath := fs.String("state", "", "JSON file that keeps node aliases across restarts (empty: memory only)")
 	mdns := fs.Bool("mdns", true, "discover nodes over mDNS (_moip._tcp)")
 	var static []string
 	fs.Func("node", "add a node by host:port (repeatable); never expires", func(v string) error {
@@ -41,6 +43,17 @@ func runServe(args []string) error {
 	}
 
 	reg := registry.New()
+	var persist func(map[string]string) error
+	if *statePath != "" {
+		f, err := store.Load(*statePath)
+		if err != nil {
+			return err
+		}
+		reg.LoadAliases(f.Aliases)
+		persist = func(aliases map[string]string) error {
+			return store.Save(*statePath, store.File{Aliases: aliases})
+		}
+	}
 	for _, addr := range static {
 		reg.Seen("static:"+addr, addr, addr)
 	}
@@ -60,7 +73,7 @@ func runServe(args []string) error {
 
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
-		Handler:           (&api.Server{Reg: reg, Ctl: control.New(reg)}).Handler(),
+		Handler:           (&api.Server{Reg: reg, Ctl: control.New(reg), Persist: persist}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

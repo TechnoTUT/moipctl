@@ -37,17 +37,20 @@ func (n Node) Name() string {
 }
 
 type Registry struct {
-	mu    sync.RWMutex
-	nodes map[string]*Node
-	subs  map[chan struct{}]struct{}
-	now   func() time.Time
+	mu sync.RWMutex
+	// aliases outlive nodes: a name set for a node applies when it is next seen.
+	aliases map[string]string
+	nodes   map[string]*Node
+	subs    map[chan struct{}]struct{}
+	now     func() time.Time
 }
 
 func New() *Registry {
 	return &Registry{
-		nodes: map[string]*Node{},
-		subs:  map[chan struct{}]struct{}{},
-		now:   time.Now,
+		aliases: map[string]string{},
+		nodes:   map[string]*Node{},
+		subs:    map[chan struct{}]struct{}{},
+		now:     time.Now,
 	}
 }
 
@@ -58,7 +61,7 @@ func (r *Registry) Seen(id, hostname, addr string) (changed bool) {
 	r.mu.Lock()
 	n, ok := r.nodes[id]
 	if !ok {
-		n = &Node{ID: id}
+		n = &Node{ID: id, Alias: r.aliases[id]}
 		r.nodes[id] = n
 	}
 	changed = !ok || n.Addr != addr || !n.Online
@@ -116,18 +119,47 @@ func (r *Registry) SetConnected(id string, connected bool) {
 	}
 }
 
-// SetAlias sets the display name of a node. It returns false for an unknown id.
+// SetAlias sets the display name of a node; an empty alias clears it. It
+// returns false for an unknown id.
 func (r *Registry) SetAlias(id, alias string) bool {
 	r.mu.Lock()
 	n, ok := r.nodes[id]
 	if ok {
 		n.Alias = alias
+		if alias == "" {
+			delete(r.aliases, id)
+		} else {
+			r.aliases[id] = alias
+		}
 	}
 	r.mu.Unlock()
 	if ok {
 		r.notify()
 	}
 	return ok
+}
+
+// LoadAliases sets the remembered aliases, for use before any node is seen.
+func (r *Registry) LoadAliases(aliases map[string]string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, a := range aliases {
+		if a != "" {
+			r.aliases[id] = a
+		}
+	}
+}
+
+// Aliases returns a copy of all remembered aliases, including those of nodes
+// that are not currently known.
+func (r *Registry) Aliases() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]string, len(r.aliases))
+	for id, a := range r.aliases {
+		out[id] = a
+	}
+	return out
 }
 
 func (r *Registry) Get(id string) (Node, bool) {

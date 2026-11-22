@@ -110,3 +110,25 @@ func TestConnectedFollowsStreamAndAddress(t *testing.T) {
 		t.Fatal("Gone clears Online and Connected")
 	}
 }
+
+func TestAliasesSurviveBeforeAndAfterTheNodeIsSeen(t *testing.T) {
+	r := New()
+	r.LoadAliases(map[string]string{"a": "entrance", "b": ""})
+	r.Seen("a", "utone-a", "x:1")
+	if n, _ := r.Get("a"); n.Alias != "entrance" || n.Name() != "entrance" {
+		t.Fatalf("remembered alias should apply when the node appears: %+v", n)
+	}
+	if got := r.Aliases(); len(got) != 1 || got["a"] != "entrance" {
+		t.Fatalf("got %v", got)
+	}
+	r.SetAlias("a", "")
+	if n, _ := r.Get("a"); n.Alias != "" || len(r.Aliases()) != 0 {
+		t.Fatal("empty alias should clear it")
+	}
+	r.Gone("a")
+	r.SetAlias("a", "lobby")
+	r.Seen("a", "utone-a", "x:2")
+	if n, _ := r.Get("a"); n.Alias != "lobby" {
+		t.Fatalf("got %+v", n)
+	}
+}
