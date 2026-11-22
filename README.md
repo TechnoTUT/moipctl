@@ -41,7 +41,8 @@ Keep `external/moip-toolkit` and utone-linux's `opt/moip-toolkit` on the same co
 
 ## API
 
-Errors are `{"detail": "..."}`.
+Errors are `{"detail": "..."}`. Writes (POST, PUT) must send `Content-Type: application/json`, and a write that names another
+origin is refused: the API has no authentication, so this keeps a web page that an operator happens to have open from driving it.
 
 | Method | Path | Description |
 |---|---|---|
@@ -54,7 +55,7 @@ Errors are `{"detail": "..."}`.
 `role/action` is one of `rx/{start,switch,stop}`, `tx/{start,stop}`, `multiview/{start,stop}`, `signage/{start,stop}`.
 
 ```bash
-curl -X POST localhost:8080/api/bulk/rx/switch \
+curl -X POST localhost:8080/api/bulk/rx/switch -H 'Content-Type: application/json' \
   -d '{"nodes": ["utone-a1b2c3", "utone-d4e5f6"], "body": {"sender_name": "CAM1 (OBS)"}}'
 ```
 
