@@ -1,0 +1,42 @@
+# Two test nodes for a cluster that has vxlan-cni (kube-public/vxlan): one on VLAN 20 and one on
+# VLAN 42. Each one advertises _moip._tcp from avahi-daemon inside the pod, so a moipctl scout on
+# the same VLAN finds it. The pod name is the node ID. They stop by themselves after an hour.
+#
+#   kubectl create namespace moipctl-verify
+#   kubectl -n moipctl-verify apply -f test/node/pod.yaml
+#   kubectl -n moipctl-verify delete -f test/node/pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testnode-av
+  labels: { app: moipctl-testnode }
+  annotations:
+    k8s.v1.cni.cncf.io/networks: '[{ "name": "vxlan", "namespace": "kube-public", "interface": "av", "cni-args": { "vlan": 20 } }]'
+spec:
+  activeDeadlineSeconds: 3600
+  restartPolicy: Never
+  containers:
+  - name: node
+    image: ghcr.io/technotut/moipctl-node-test:main
+    ports:
+    - { name: http, containerPort: 8000 }
+    readinessProbe:
+      httpGet: { path: /api/node/info, port: http }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testnode-ent
+  labels: { app: moipctl-testnode }
+  annotations:
+    k8s.v1.cni.cncf.io/networks: '[{ "name": "vxlan", "namespace": "kube-public", "interface": "ent", "cni-args": { "vlan": 42 } }]'
+spec:
+  activeDeadlineSeconds: 3600
+  restartPolicy: Never
+  containers:
+  - name: node
+    image: ghcr.io/technotut/moipctl-node-test:main
+    ports:
+    - { name: http, containerPort: 8000 }
+    readinessProbe:
+      httpGet: { path: /api/node/info, port: http }
