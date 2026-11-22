@@ -1,0 +1,54 @@
+name: node-image
+
+# Builds test/node, a real moip-toolkit node in a container (avahi-daemon included,
+# no NDI runtime), and pushes ghcr.io/technotut/moipctl-node-test. It is a test fixture
+# for trying moipctl on a cluster without hardware, not something to run in production.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'test/**']
+    paths:
+      - test/node/**
+      - external/moip-toolkit
+      - .github/workflows/node-image.yml
+  pull_request:
+    paths:
+      - test/node/**
+      - external/moip-toolkit
+      - .github/workflows/node-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Only the toolkit is compiled; the other submodule (utone-linux) is not needed.
+      - run: git submodule update --init --recursive external/moip-toolkit
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}-node-test
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: test/node/Dockerfile
+          platforms: linux/amd64
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

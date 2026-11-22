@@ -1,0 +1,8 @@
+# The build context for test/node/Dockerfile: only the toolkit sources it compiles.
+.git
+bin
+external/utone-linux
+external/moip-toolkit/frontend
+external/moip-toolkit/engine/target
+external/moip-toolkit/.git
+**/.git
