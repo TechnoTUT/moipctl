@@ -115,3 +115,22 @@ func TestNodesNotFoundByDiscoveryNeverExpire(t *testing.T) {
 		t.Fatal("discovery must not expire a node it did not find")
 	}
 }
+
+func TestPicksTheAddressOnADirectlyAttachedSubnet(t *testing.T) {
+	_, av, _ := net.ParseCIDR("10.10.16.0/20")
+	defer func(old func() []*net.IPNet) { localNets = old }(localNets)
+	localNets = func() []*net.IPNet { return []*net.IPNet{av} }
+
+	// What a pod on VLAN 20 and 42 answered in the cluster: the pod network
+	// address of the other side is listed first and is not reachable.
+	e, ok := entryFromService(svc("n", 8000, nil, "10.15.1.226", "192.168.12.34", "10.10.20.3"))
+	if !ok || e.Addr != "10.10.20.3:8000" {
+		t.Fatalf("want the address on the attached subnet, got %+v ok=%v", e, ok)
+	}
+
+	// Attached to nothing that matches: the first usable address, as before.
+	localNets = func() []*net.IPNet { return nil }
+	if e, _ := entryFromService(svc("n", 8000, nil, "169.254.1.1", "10.15.1.226", "10.10.20.3")); e.Addr != "10.15.1.226:8000" {
+		t.Fatalf("got %+v", e)
+	}
+}

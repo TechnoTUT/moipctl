@@ -166,6 +166,43 @@ func (ZeroconfBrowser) Browse(ctx context.Context, window time.Duration) ([]Entr
 	}
 }
 
+// localNets returns the subnets this host is directly attached to, one per
+// IPv4 address of an up interface. It is a variable so tests can replace it.
+var localNets = func() []*net.IPNet {
+	var nets []*net.IPNet
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && !n.IP.IsLoopback() {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}
+
+// pickIPv4 chooses the address to talk to out of everything a node answered
+// with. A node answers with the addresses of all its interfaces, and the one
+// that works is on a subnet this host is attached to (the VLAN the answer came
+// in on), so those win; otherwise the first usable address is returned.
+func pickIPv4(ips []net.IP) (net.IP, bool) {
+	var first net.IP
+	local := localNets()
+	for _, ip := range ips {
+		ip4 := ip.To4()
+		if ip4 == nil || ip4.IsLinkLocalUnicast() || ip4.IsLoopback() {
+			continue
+		}
+		for _, n := range local {
+			if n.Contains(ip4) {
+				return ip4, true
+			}
+		}
+		if first == nil {
+			first = ip4
+		}
+	}
+	return first, first != nil
+}
+
 // entryFromService converts an mDNS answer. It returns false if the answer
 // has no usable IPv4 address or port.
 func entryFromService(se *zeroconf.ServiceEntry) (Entry, bool) {
@@ -185,10 +222,9 @@ func entryFromService(se *zeroconf.ServiceEntry) (Entry, bool) {
 	if id == "" || se.Port == 0 {
 		return Entry{}, false
 	}
-	for _, ip := range se.AddrIPv4 {
-		if ip4 := ip.To4(); ip4 != nil && !ip4.IsLinkLocalUnicast() && !ip4.IsLoopback() {
-			return Entry{ID: id, Hostname: host, Addr: net.JoinHostPort(ip4.String(), strconv.Itoa(se.Port))}, true
-		}
+	ip, ok := pickIPv4(se.AddrIPv4)
+	if !ok {
+		return Entry{}, false
 	}
-	return Entry{}, false
+	return Entry{ID: id, Hostname: host, Addr: net.JoinHostPort(ip.String(), strconv.Itoa(se.Port))}, true
 }
