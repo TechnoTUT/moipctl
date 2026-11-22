@@ -1,0 +1,6 @@
+[submodule "external/moip-toolkit"]
+	path = external/moip-toolkit
+	url = https://github.com/TechnoTUT/moip-toolkit.git
+[submodule "external/utone-linux"]
+	path = external/utone-linux
+	url = https://github.com/TechnoTUT/utone-linux.git
