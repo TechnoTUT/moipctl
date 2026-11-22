@@ -18,6 +18,9 @@ spec:
   containers:
   - name: node
     image: ghcr.io/technotut/moipctl-node-test:main
+    securityContext:
+      capabilities:
+        add: ["NET_ADMIN"]   # the entrypoint sets up routing for the VLAN interface
     ports:
     - { name: http, containerPort: 8000 }
     readinessProbe:
@@ -36,6 +39,9 @@ spec:
   containers:
   - name: node
     image: ghcr.io/technotut/moipctl-node-test:main
+    securityContext:
+      capabilities:
+        add: ["NET_ADMIN"]   # the entrypoint sets up routing for the VLAN interface
     ports:
     - { name: http, containerPort: 8000 }
     readinessProbe:

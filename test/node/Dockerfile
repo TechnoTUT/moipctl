@@ -34,7 +34,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # ---- Runtime ----
 FROM docker.io/library/debian:trixie-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libsdl2-2.0-0 libasound2t64 avahi-daemon dbus \
+ && apt-get install -y --no-install-recommends libsdl2-2.0-0 libasound2t64 avahi-daemon dbus iproute2 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=engine /moip-engine /opt/moip/bin/moip-engine
 COPY --from=server /moip /opt/moip/bin/moip
