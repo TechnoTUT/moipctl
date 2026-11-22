@@ -24,7 +24,7 @@ func runScout(args []string) error {
 	controller := fs.String("controller", os.Getenv("MOIPCTL_CONTROLLER"), "base URL of the controller's scout listener, e.g. http://moipctl:8081 ($MOIPCTL_CONTROLLER)")
 	source := fs.String("source", os.Getenv("MOIPCTL_SOURCE"), "name of this scout, e.g. the VLAN: av or ent ($MOIPCTL_SOURCE)")
 	interval := fs.Duration("interval", 15*time.Second, "time between searches")
-	window := fs.Duration("window", 4*time.Second, "how long one search listens for answers")
+	window := fs.Duration("window", 6*time.Second, "how long one search listens for answers; it sends three queries within it")
 	health := fs.String("health", ":8082", "address for GET /healthz (empty: disabled)")
 	if err := fs.Parse(args); err != nil {
 		return err

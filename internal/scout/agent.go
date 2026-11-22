@@ -29,7 +29,7 @@ func (a *Agent) withDefaults() {
 		a.Interval = 15 * time.Second
 	}
 	if a.Window <= 0 {
-		a.Window = 4 * time.Second
+		a.Window = 6 * time.Second
 	}
 	if a.Client == nil {
 		a.Client = &http.Client{Timeout: 10 * time.Second}
