@@ -3,6 +3,12 @@
 //	GET /api/nodes          all known nodes
 //	GET /api/nodes/{id}     one node
 //	GET /api/events         Server-Sent Events: the node list, sent when it changes
+//	POST /api/nodes/{id}/{role}/{action}
+//	                        forward an operation to one node; the body goes to
+//	                        the node as is and the node's reply comes back
+//	POST /api/bulk/{role}/{action}
+//	                        {"nodes": [ids], "body": {...}}: run it on several
+//	                        nodes; {"results": [...]} has one entry per node
 //
 // Errors are returned as {"detail": "..."} like moip-toolkit's API.
 package api
@@ -10,14 +16,22 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
+	"github.com/TechnoTUT/moipctl/internal/control"
 	"github.com/TechnoTUT/moipctl/internal/registry"
+)
+
+const (
+	maxBody      = 1 << 20
+	maxBulkNodes = 64
 )
 
 type Server struct {
 	Reg *registry.Registry
+	Ctl *control.Controller
 }
 
 func (s *Server) Handler() http.Handler {
@@ -37,10 +51,62 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, n)
 	})
 	mux.HandleFunc("GET /api/events", s.events)
+	mux.HandleFunc("POST /api/nodes/{id}/{role}/{action}", s.call)
+	mux.HandleFunc("POST /api/bulk/{role}/{action}", s.bulk)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusNotFound, "not found")
 	})
 	return mux
+}
+
+func (s *Server) call(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if err != nil {
+		httpError(w, http.StatusRequestEntityTooLarge, "body too large")
+		return
+	}
+	res := s.Ctl.Call(r.Context(), r.PathValue("id"), r.PathValue("role"), r.PathValue("action"), body)
+	if !res.OK {
+		httpError(w, res.Code, res.Error)
+		return
+	}
+	if len(res.Response) == 0 {
+		res.Response = json.RawMessage("{}")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(res.Code)
+	w.Write(res.Response)
+}
+
+func (s *Server) bulk(w http.ResponseWriter, r *http.Request) {
+	role, action := r.PathValue("role"), r.PathValue("action")
+	if !control.ValidOp(role, action) {
+		httpError(w, http.StatusNotFound, "unsupported operation")
+		return
+	}
+	var req struct {
+		Nodes []string        `json:"nodes"`
+		Body  json.RawMessage `json:"body"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	// Ask for ids explicitly: "everything" is too easy to hit by accident
+	// when a node does not have the role.
+	if len(req.Nodes) == 0 || len(req.Nodes) > maxBulkNodes {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("nodes must list 1 to %d ids", maxBulkNodes))
+		return
+	}
+	seen := map[string]bool{}
+	ids := req.Nodes[:0:0]
+	for _, id := range req.Nodes {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": s.Ctl.CallMany(r.Context(), ids, role, action, req.Body)})
 }
 
 // events streams the node list: once on connect, then after every change.

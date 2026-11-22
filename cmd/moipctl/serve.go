@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/TechnoTUT/moipctl/internal/api"
+	"github.com/TechnoTUT/moipctl/internal/control"
 	"github.com/TechnoTUT/moipctl/internal/discovery"
 	"github.com/TechnoTUT/moipctl/internal/registry"
 	"github.com/TechnoTUT/moipctl/internal/stream"
@@ -59,7 +60,7 @@ func runServe(args []string) error {
 
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
-		Handler:           (&api.Server{Reg: reg}).Handler(),
+		Handler:           (&api.Server{Reg: reg, Ctl: control.New(reg)}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
