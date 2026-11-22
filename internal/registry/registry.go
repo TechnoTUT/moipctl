@@ -16,13 +16,16 @@ import (
 // A Node returned by the registry is a snapshot. State is never modified
 // after it is stored, so the pointer can be shared safely.
 type Node struct {
-	ID       string      `json:"id"`
-	Hostname string      `json:"hostname"`
-	Alias    string      `json:"alias,omitempty"`
-	Addr     string      `json:"addr"` // host:port of the node's HTTP API
-	Online   bool        `json:"online"`
-	LastSeen time.Time   `json:"last_seen"`
-	State    *moip.State `json:"state,omitempty"`
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+	Alias    string `json:"alias,omitempty"`
+	Addr     string `json:"addr"`   // host:port of the node's HTTP API
+	Online   bool   `json:"online"` // advertised on the network
+	// Connected is true while the node's state stream is alive. An online node
+	// that is not connected shows a State that may be stale.
+	Connected bool        `json:"connected"`
+	LastSeen  time.Time   `json:"last_seen"`
+	State     *moip.State `json:"state,omitempty"`
 }
 
 // Name is what to show for the node: the alias if set, else the hostname.
@@ -59,6 +62,9 @@ func (r *Registry) Seen(id, hostname, addr string) (changed bool) {
 		r.nodes[id] = n
 	}
 	changed = !ok || n.Addr != addr || !n.Online
+	if n.Addr != addr {
+		n.Connected = false // the old stream, if any, was to another address
+	}
 	n.Hostname, n.Addr, n.Online, n.LastSeen = hostname, addr, true, r.now()
 	r.mu.Unlock()
 	if changed {
@@ -72,9 +78,9 @@ func (r *Registry) Seen(id, hostname, addr string) (changed bool) {
 func (r *Registry) Gone(id string) {
 	r.mu.Lock()
 	n, ok := r.nodes[id]
-	changed := ok && n.Online
+	changed := ok && (n.Online || n.Connected)
 	if changed {
-		n.Online = false
+		n.Online, n.Connected = false, false
 	}
 	r.mu.Unlock()
 	if changed {
@@ -82,16 +88,30 @@ func (r *Registry) Gone(id string) {
 	}
 }
 
-// SetState stores the latest state received from the node. Unknown ids are
-// ignored.
+// SetState stores the latest state received from the node and marks its
+// stream connected. Unknown ids are ignored.
 func (r *Registry) SetState(id string, st *moip.State) {
 	r.mu.Lock()
 	n, ok := r.nodes[id]
 	if ok {
-		n.State, n.LastSeen = st, r.now()
+		n.State, n.Connected, n.LastSeen = st, true, r.now()
 	}
 	r.mu.Unlock()
 	if ok {
+		r.notify()
+	}
+}
+
+// SetConnected records whether the node's state stream is alive.
+func (r *Registry) SetConnected(id string, connected bool) {
+	r.mu.Lock()
+	n, ok := r.nodes[id]
+	changed := ok && n.Connected != connected
+	if changed {
+		n.Connected = connected
+	}
+	r.mu.Unlock()
+	if changed {
 		r.notify()
 	}
 }

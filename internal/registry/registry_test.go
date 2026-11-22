@@ -84,3 +84,29 @@ func TestSubscribeCoalesces(t *testing.T) {
 	default:
 	}
 }
+
+func TestConnectedFollowsStreamAndAddress(t *testing.T) {
+	r := New()
+	r.Seen("a", "h", "10.0.0.1:8000")
+	if n, _ := r.Get("a"); n.Connected {
+		t.Fatal("a node is not connected before a state arrives")
+	}
+	r.SetState("a", &moip.State{})
+	if n, _ := r.Get("a"); !n.Connected {
+		t.Fatal("a state means the stream is alive")
+	}
+	r.SetConnected("a", false)
+	if n, _ := r.Get("a"); n.Connected || n.State == nil {
+		t.Fatalf("lost stream keeps the last state but clears Connected: %+v", n)
+	}
+	r.SetState("a", &moip.State{})
+	r.Seen("a", "h", "10.0.0.2:8000")
+	if n, _ := r.Get("a"); n.Connected {
+		t.Fatal("moving to a new address invalidates the old stream")
+	}
+	r.SetState("a", &moip.State{})
+	r.Gone("a")
+	if n, _ := r.Get("a"); n.Connected || n.Online {
+		t.Fatal("Gone clears Online and Connected")
+	}
+}
