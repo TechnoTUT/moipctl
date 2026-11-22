@@ -1,6 +1,7 @@
 // Command moipctl manages several moip-toolkit nodes from one place.
 //
 //	moipctl serve [flags]    run the controller (REST API and web UI)
+//	moipctl scout [flags]    search for nodes on this VLAN and report them to the controller
 //	moipctl version          show the version
 package main
 
@@ -17,6 +18,7 @@ const usage = `moipctl
 
 Usage:
   moipctl serve [flags]    Start the controller
+  moipctl scout [flags]    Search for nodes on this network and report them to a controller
   moipctl version          Show the version
 `
 
@@ -28,6 +30,10 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		if err := runServe(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+	case "scout":
+		if err := runScout(os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
 	case "version":

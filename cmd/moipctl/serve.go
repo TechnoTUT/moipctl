@@ -20,6 +20,7 @@ import (
 	"github.com/TechnoTUT/moipctl/internal/control"
 	"github.com/TechnoTUT/moipctl/internal/discovery"
 	"github.com/TechnoTUT/moipctl/internal/registry"
+	"github.com/TechnoTUT/moipctl/internal/scout"
 	"github.com/TechnoTUT/moipctl/internal/store"
 	"github.com/TechnoTUT/moipctl/internal/stream"
 )
@@ -29,7 +30,9 @@ func runServe(args []string) error {
 	host := fs.String("host", "0.0.0.0", "listen address")
 	port := fs.Int("port", 8080, "listen port")
 	statePath := fs.String("state", "", "JSON file that keeps node aliases across restarts (empty: memory only)")
-	mdns := fs.Bool("mdns", true, "discover nodes over mDNS (_moip._tcp)")
+	mdns := fs.Bool("mdns", true, "discover nodes over mDNS (_moip._tcp) from this process; needs it to be attached to the nodes' VLANs")
+	scoutListen := fs.String("scout-listen", "", "address for reports from scouts, e.g. :8081 (empty: disabled). Must not be reachable from the networks that use the API")
+	scoutTTL := fs.Duration("scout-ttl", 45*time.Second, "a node that no scout has reported for this long is marked offline")
 	var static []string
 	fs.Func("node", "add a node by host:port (repeatable); never expires", func(v string) error {
 		if _, _, err := net.SplitHostPort(v); err != nil {
@@ -71,6 +74,20 @@ func runServe(args []string) error {
 		run(discovery.New(reg, discovery.ZeroconfBrowser{}, discovery.Options{}).Run)
 	}
 
+	var scoutSrv *http.Server
+	if *scoutListen != "" {
+		hub := scout.NewHub(reg, *scoutTTL)
+		run(hub.Run)
+		scoutSrv = &http.Server{Addr: *scoutListen, Handler: hub.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			log.Printf("accepting scout reports on %s (ttl %s)", scoutSrv.Addr, *scoutTTL)
+			if err := scoutSrv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("scout listener: %v", err)
+				stop()
+			}
+		}()
+	}
+
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
 		Handler:           (&api.Server{Reg: reg, Ctl: control.New(reg), Persist: persist}).Handler(),
@@ -81,6 +98,9 @@ func runServe(args []string) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdownCtx)
+		if scoutSrv != nil {
+			scoutSrv.Shutdown(shutdownCtx)
+		}
 	}()
 
 	log.Printf("moipctl %s listening on %s (mdns=%v, static nodes=%s)", version, srv.Addr, *mdns, strings.Join(static, ","))
